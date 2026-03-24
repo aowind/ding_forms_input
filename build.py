@@ -29,8 +29,9 @@ def main():
     print("  钉钉表格自动填入工具 - 一键构建")
     print("=" * 60)
 
-    project_dir = Path(__file__).parent
+    project_dir = Path(__file__).parent.resolve()
     os.chdir(project_dir)
+    print(f"  项目目录: {project_dir}")
 
     # 安装依赖
     run(f"{sys.executable} -m pip install -r requirements.txt", "安装 Python 依赖")
