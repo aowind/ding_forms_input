@@ -124,6 +124,7 @@ class StepExecute(ctk.CTkFrame):
                 items=data,
                 id_mapping=mapping,
                 progress_callback=progress_cb,
+                browser_manager=self.app.browser,
             )
             self.progress.set(1.0)
             self.result_label.configure(

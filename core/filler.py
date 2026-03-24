@@ -199,6 +199,7 @@ class TableFiller:
         id_mapping: dict[str, int],
         match_col_letter: str = "D",
         progress_callback=None,
+        browser_manager=None,
     ) -> FillResult:
         """执行完整填入流程。"""
         result = FillResult()
@@ -221,6 +222,10 @@ class TableFiller:
                       (f" 等 {len(result.skipped)} 个" if len(result.skipped) > 10 else ""))
         if not matched:
             return result
+
+        # 锁定用户输入，防止干扰
+        if browser_manager:
+            await browser_manager.lock_input()
 
         # 初始化位置
         await self.init_position()
@@ -275,4 +280,9 @@ class TableFiller:
 
         self._log("")
         self._log(f"🎉 完成！成功: {len(result.success)}, 失败: {len(result.failed)}, 跳过: {len(result.skipped)}")
+
+        # 解锁用户输入
+        if browser_manager:
+            await browser_manager.unlock_input()
+
         return result
