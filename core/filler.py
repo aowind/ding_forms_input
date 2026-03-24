@@ -63,36 +63,21 @@ class TableFiller:
         rows_to_move = target_row - self._current_row
 
         if rows_to_move > 0:
-            # 向下移动 — 大距离用 PageDown 粗定位 + ArrowDown 精调
-            remaining = rows_to_move
-            while remaining > 0:
+            # 向下移动 — 全部用 ArrowDown，绝对精确
+            for _ in range(rows_to_move):
                 if self._abort:
                     return False
-                if remaining > 15:
-                    # PageDown 跳约 25 行
-                    await self.page.keyboard.press("PageDown")
-                    remaining -= 25
-                    await asyncio.sleep(0.4)
-                else:
-                    await self.page.keyboard.press("ArrowDown")
-                    remaining -= 1
-                    await asyncio.sleep(CELL_WAIT / 1000)
+                await self.page.keyboard.press("ArrowDown")
+                await asyncio.sleep(CELL_WAIT / 1000)
         elif rows_to_move < 0:
-            # 向上移动 — 回到 A1 重新向下导航（向上 PageUp 不可靠）
+            # 向上移动 — 回到 A1 重新向下导航
             self._log(f"  需要上移 {-rows_to_move} 行，回 A1 重定位...")
             await self._goto_a1()
-            rows_to_move = target_row - 1
-            while rows_to_move > 0:
+            for _ in range(target_row - 1):
                 if self._abort:
                     return False
-                if rows_to_move > 15:
-                    await self.page.keyboard.press("PageDown")
-                    rows_to_move -= 25
-                    await asyncio.sleep(0.4)
-                else:
-                    await self.page.keyboard.press("ArrowDown")
-                    rows_to_move -= 1
-                    await asyncio.sleep(CELL_WAIT / 1000)
+                await self.page.keyboard.press("ArrowDown")
+                await asyncio.sleep(CELL_WAIT / 1000)
 
         self._current_row = target_row
 
