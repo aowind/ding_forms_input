@@ -9,9 +9,10 @@ from dataclasses import dataclass, field
 logger = logging.getLogger(__name__)
 
 # 默认参数
-CELL_WAIT = 350          # 每次键盘操作等待 (ms)
-TYPE_DELAY = 30           # 输入字符间隔 (ms)
-ROW_WAIT = 1500           # 行间等待 (ms)
+CELL_WAIT = 200            # 每次键盘操作等待 (ms)，相对移动可以更快
+CELL_WAIT_SLOW = 350       # 回退重定位时用慢速
+TYPE_DELAY = 30            # 输入字符间隔 (ms)
+ROW_WAIT = 800             # 行间等待 (ms)
 
 
 @dataclass
@@ -25,18 +26,13 @@ class TableFiller:
     """钉钉表格自动填入器。"""
 
     def __init__(self, page, log_callback=None):
-        """
-        Args:
-            page: Playwright Page 对象
-            log_callback: 日志回调函数 log_callback(str)
-        """
         self.page = page
         self._log = log_callback or (lambda msg: logger.info(msg))
         self._current_row = 1
+        self._current_col = 0  # 0=A
         self._abort = False
 
     def abort(self):
-        """中断执行。"""
         self._abort = True
 
     async def init_position(self):
@@ -48,67 +44,126 @@ class TableFiller:
         await self.page.keyboard.up("Control")
         await asyncio.sleep(1.0)
         self._current_row = 1
+        self._current_col = 0
         self._log("已定位到 A1")
 
     async def navigate_to_row(self, target_row: int, match_col_offset: int) -> bool:
-        """从当前行导航到目标行目标列，并验证定位。
+        """从当前位置相对移动到目标行目标列，并验证定位。
+
+        只在定位失败时才回退到 A1 重来。
 
         Args:
-            target_row: 目标行号 (1-based, Excel 行号)
-            match_col_offset: 匹配列距离 A 列的偏移量 (A=0, D=3)
+            target_row: 目标行号 (1-based)
+            match_col_offset: 匹配列距 A 列的偏移量 (A=0, D=3)
 
         Returns:
             True 定位成功
         """
-        # 回到 A1 精确导航
-        await self.page.keyboard.down("Control")
-        await self.page.keyboard.press("Home")
-        await self.page.keyboard.up("Control")
-        await asyncio.sleep(0.8)
-        self._current_row = 1
+        # 计算需要移动几行
+        rows_to_move = target_row - self._current_row
 
-        # 逐行 ArrowDown
-        for _ in range(target_row - 1):
-            if self._abort:
-                return False
-            await self.page.keyboard.press("ArrowDown")
-            await asyncio.sleep(CELL_WAIT / 1000)
+        if rows_to_move > 0:
+            # 向下移动 — 大距离用 PageDown 粗定位 + ArrowDown 精调
+            remaining = rows_to_move
+            while remaining > 0:
+                if self._abort:
+                    return False
+                if remaining > 15:
+                    # PageDown 跳约 25 行
+                    await self.page.keyboard.press("PageDown")
+                    remaining -= 25
+                    await asyncio.sleep(0.4)
+                else:
+                    await self.page.keyboard.press("ArrowDown")
+                    remaining -= 1
+                    await asyncio.sleep(CELL_WAIT / 1000)
+        elif rows_to_move < 0:
+            # 向上移动 — 回到 A1 重新向下导航（向上 PageUp 不可靠）
+            self._log(f"  需要上移 {-rows_to_move} 行，回 A1 重定位...")
+            await self._goto_a1()
+            rows_to_move = target_row - 1
+            while rows_to_move > 0:
+                if self._abort:
+                    return False
+                if rows_to_move > 15:
+                    await self.page.keyboard.press("PageDown")
+                    rows_to_move -= 25
+                    await asyncio.sleep(0.4)
+                else:
+                    await self.page.keyboard.press("ArrowDown")
+                    rows_to_move -= 1
+                    await asyncio.sleep(CELL_WAIT / 1000)
+
         self._current_row = target_row
 
-        # Home 到 A 列
+        # 先 Home 到 A 列
         await self.page.keyboard.press("Home")
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.2)
+        self._current_col = 0
 
         # ArrowRight 到匹配列
         for _ in range(match_col_offset):
             await self.page.keyboard.press("ArrowRight")
             await asyncio.sleep(CELL_WAIT / 1000)
+        self._current_col = match_col_offset
 
         # Ctrl+C 验证
         return await self._verify_cell()
 
-    async def _verify_cell(self) -> bool:
-        """读取当前单元格值用于验证。"""
+    async def _goto_a1(self):
+        """回到 A1（慢速，用于错误恢复）。"""
+        await self.page.keyboard.down("Control")
+        await self.page.keyboard.press("Home")
+        await self.page.keyboard.up("Control")
+        await asyncio.sleep(0.8)
+        self._current_row = 1
+        self._current_col = 0
+
+    async def _verify_and_recover(self, target_row: int, match_col_offset: int, expected_value: str) -> bool:
+        """验证当前单元格，如果不对就回 A1 重来一次。"""
+        cell_val = await self._read_cell()
+        if cell_val == expected_value:
+            return True
+
+        # 第一次失败，回 A1 精确重定位
+        self._log(f"  ⚠️ 定位偏移（期望 {expected_value}，实际 {cell_val}），回 A1 重来...")
+        await self._goto_a1()
+
+        for _ in range(target_row - 1):
+            if self._abort:
+                return False
+            await self.page.keyboard.press("ArrowDown")
+            await asyncio.sleep(CELL_WAIT_SLOW / 1000)
+        self._current_row = target_row
+
+        await self.page.keyboard.press("Home")
+        await asyncio.sleep(0.3)
+        self._current_col = 0
+        for _ in range(match_col_offset):
+            await self.page.keyboard.press("ArrowRight")
+            await asyncio.sleep(CELL_WAIT_SLOW / 1000)
+        self._current_col = match_col_offset
+
+        cell_val = await self._read_cell()
+        if cell_val == expected_value:
+            return True
+
+        self._log(f"  ❌ 重定位仍失败（实际 {cell_val}），跳过")
+        return False
+
+    async def _read_cell(self) -> str:
+        """Ctrl+C 读取当前单元格值。"""
         await self.page.keyboard.down("Control")
         await self.page.keyboard.press("c")
         await self.page.keyboard.up("Control")
         await asyncio.sleep(0.3)
         try:
-            val = await self.page.evaluate("() => navigator.clipboard.readText()")
-            return True  # 读到值说明定位正确
+            return (await self.page.evaluate("() => navigator.clipboard.readText()")).strip()
         except Exception:
-            return False
+            return ""
 
-    async def fill_row(self, values: list[str], fill_col_offset: int) -> int:
-        """在当前行从填入列开始填入值。
-
-        Args:
-            values: 待填入的值列表
-            fill_col_offset: 第一个填入列距离匹配列的偏移 (通常是 Tab 1 次到 E)
-
-        Returns:
-            实际填入的非空值数量
-        """
+    async def fill_row(self, values: list[str]) -> int:
+        """在当前行从填入列开始填入值。调用前光标在匹配列。"""
         # Tab 移到第一个填入列
         await self.page.keyboard.press("Tab")
         await asyncio.sleep(CELL_WAIT / 1000)
@@ -119,26 +174,22 @@ class TableFiller:
                 break
 
             if not val or val.strip() == "" or val == "None":
-                # 空值也要 Tab 跳过，保持列对齐
                 await self.page.keyboard.press("Tab")
                 await asyncio.sleep(CELL_WAIT / 1000)
                 continue
 
-            # F2 进入编辑
+            # F2 → Ctrl+A → type → Tab
             await self.page.keyboard.press("F2")
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.15)
 
-            # Ctrl+A 全选
             await self.page.keyboard.down("Control")
             await self.page.keyboard.press("a")
             await self.page.keyboard.up("Control")
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.08)
 
-            # 输入值
             await self.page.keyboard.type(val, delay=TYPE_DELAY)
             await asyncio.sleep(CELL_WAIT / 1000)
 
-            # Tab 确认并移到下一列（不能用 Enter！）
             await self.page.keyboard.press("Tab")
             await asyncio.sleep(CELL_WAIT / 1000)
 
@@ -150,7 +201,8 @@ class TableFiller:
 
         # Home 回到 A 列
         await self.page.keyboard.press("Home")
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.2)
+        self._current_col = 0
 
         return filled
 
@@ -161,22 +213,11 @@ class TableFiller:
         match_col_letter: str = "D",
         progress_callback=None,
     ) -> FillResult:
-        """执行完整填入流程。
-
-        Args:
-            items: 待填入数据列表，每项包含 match_value 和 fill_values
-            id_mapping: {匹配值: 钉钉表格行号}
-            match_col_letter: 匹配列字母 (A=0, B=1, ..., D=3)
-            progress_callback: 进度回调 progress_callback(current, total)
-
-        Returns:
-            FillResult 填入结果
-        """
+        """执行完整填入流程。"""
         result = FillResult()
         col_offset = ord(match_col_letter.upper()) - ord("A")
-        total = len(items)
 
-        # 匹配
+        # 匹配并排序
         matched: list[dict] = []
         for item in items:
             target = id_mapping.get(item["match_value"])
@@ -185,10 +226,12 @@ class TableFiller:
             else:
                 result.skipped.append(item["match_value"])
 
-        # 按目标行号排序
         matched.sort(key=lambda x: x["target_row"])
 
         self._log(f"匹配成功: {len(matched)} 行, 未找到: {len(result.skipped)} 行")
+        if result.skipped:
+            self._log(f"未匹配 ID: {', '.join(result.skipped[:10])}" +
+                      (f" 等 {len(result.skipped)} 个" if len(result.skipped) > 10 else ""))
         if not matched:
             return result
 
@@ -210,13 +253,15 @@ class TableFiller:
             try:
                 ok = await self.navigate_to_row(tr, col_offset)
                 if not ok:
-                    self._log(f"  ❌ 定位失败，跳过")
+                    # navigate_to_row 失败，尝试恢复
+                    ok = await self._verify_and_recover(tr, col_offset, mv)
+
+                if not ok:
                     result.failed.append({"match_value": mv, "error": "定位失败"})
-                    # 重新初始化
-                    await self.init_position()
+                    await self._goto_a1()
                     continue
 
-                filled = await self.fill_row(vals, 1)
+                filled = await self.fill_row(vals)
                 self._log(f"  ✅ 填入 {filled} 个值")
                 result.success.append({
                     "match_value": mv,
@@ -226,12 +271,17 @@ class TableFiller:
             except Exception as e:
                 self._log(f"  ❌ {e}")
                 result.failed.append({"match_value": mv, "error": str(e)})
-                await self.init_position()
+                await self._goto_a1()
 
             # 行间等待
             if i < len(matched) - 1 and not self._abort:
-                self._log(f"  等待 {ROW_WAIT / 1000:.1f}s...")
-                await asyncio.sleep(ROW_WAIT / 1000)
+                # 预计下一行的移动行数
+                if i + 1 < len(matched):
+                    next_gap = matched[i + 1]["target_row"] - tr
+                    wait = min(ROW_WAIT / 1000, max(0.3, next_gap * 0.01))
+                else:
+                    wait = ROW_WAIT / 1000
+                await asyncio.sleep(wait)
 
             if progress_callback:
                 progress_callback(idx, len(matched))
