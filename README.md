@@ -4,133 +4,101 @@
 
 ## 功能
 
-- 🔐 通过 Cookie 登录钉钉文档（无需扫码）
-- 📋 自动检测 Sheet 标签页
-- 📥 自动下载钉钉表格数据并建立 ID → 行号映射
-- 📊 支持动态选择匹配列和填入列
-- 🚀 模拟键盘操作精确填入数据
-- 📝 实时日志和进度显示
+- 🔐 扫码登录钉钉文档（无需手动复制 Cookie）
+- 📊 从钉钉表格导出的 Excel 建立行映射
+- 📁 选择本地 Excel 数据文件，动态选择匹配列和填入列
+- 👁️ 映射预览：填入前可查看匹配/未匹配数据
+- 🚀 自动填入：模拟键盘操作精确填入钉钉表格
+- 🖥️ 填入时自动锁定浏览器窗口，防止误操作
 
-## 环境要求
+## 作为用户直接使用
 
-- Windows 10/11
-- Python 3.10+
+### 方式一：从 exe 运行（推荐）
 
-## 安装
+1. 解压分发的 zip 文件
+2. 双击 `钉钉表格自动填入工具.exe`
+3. 按照界面引导操作即可
 
-### 1. 克隆仓库
+### 方式二：从源码运行
 
-```bash
-git clone https://github.com/aowind/ding_forms_input.git
-cd ding_forms_input
-```
-
-### 2. 安装 Python 依赖
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. 安装 Playwright 浏览器
-
-```bash
-playwright install chromium
-```
-
-> 首次运行时如果未安装浏览器，会提示自动安装。
-
-## 使用方法
-
-### 方式一：直接运行 Python 脚本
-
-```bash
-python main.py
-```
-
-### 方式二：打包为 exe（可选）
-
-```bash
-pip install pyinstaller
-pyinstaller build.spec
-```
-
-打包后的 exe 在 `dist/钉钉表格自动填入工具/` 目录下。
+1. 安装 Python 3.9+（[下载地址](https://www.python.org/downloads/)）
+2. 安装依赖：
+   ```
+   pip install -r requirements.txt
+   playwright install chromium
+   ```
+3. 运行：
+   ```
+   python main.py
+   ```
 
 ## 使用步骤
 
-### Step 1: 登录钉钉文档
+### Step 1: 登录
+1. 输入钉钉文档 URL（如 `https://alidocs.dingtalk.com/i/nodes/...`）
+2. 点击「打开浏览器」，会弹出 Chrome
+3. 在弹出的浏览器中扫码登录
+4. 登录成功看到表格后，点击「我已登录」
 
-1. 在浏览器中打开钉钉文档并登录
-2. 按 F12 打开开发者工具 → Network 面板
-3. 刷新页面，找到任意请求，复制 Request Headers 中的 `Cookie` 值
-4. 在工具中粘贴文档 URL 和 Cookie
-5. 点击「连接」
+### Step 2: 表格信息
+自动检测文档中的 Sheet 标签，确认后进入下一步。
 
-> ⚠️ `document.cookie` 无法获取 HttpOnly cookie，请从 Network 面板复制完整 Cookie 请求头。
+### Step 3: 文件配置
 
-### Step 2: 选择 Sheet
+**第一步 - 上传钉钉导出文件（建立映射）：**
+1. 在已打开的钉钉表格页面，点击顶部工具栏「表格」→「下载」→「Excel」
+2. 将下载的 .xlsx 文件选择到工具中
+3. 选择 Sheet 和映射匹配列（用于定位行的 ID 列）
 
-1. 工具自动检测文档中的 Sheet 标签页
-2. 选择目标 Sheet
-3. 设置匹配列（默认 D 列，用于定位行）
-4. 点击「下载并建立映射」
-
-### Step 3: 选择本地 Excel
-
-1. 选择包含待填数据的 `.xlsx` 文件
+**第二步 - 选择本地数据文件：**
+1. 选择本地 Excel 数据文件
 2. 选择 Sheet
-3. 选择**匹配列**（用于匹配钉钉表格中的行）
-4. 选择**填入列**（要填入的数据列，可多选）
-5. 点击「确认并准备填入」
+3. 选择数据匹配列（与导出文件的匹配列对应）
+4. 勾选要填入的列
+
+**确认后查看映射预览**，确认无误后点击「开始执行填入」。
 
 ### Step 4: 执行填入
+点击「开始填入」，工具会自动完成填入。填入过程中浏览器窗口会被移到屏幕外，防止误操作。填入完成后浏览器窗口会自动恢复。
 
-1. 查看匹配摘要
-2. 点击「开始填入」
-3. 观察实时日志和进度
-4. 完成后查看统计结果
+## 从源码构建 exe
 
-## 获取 Cookie 方法
+在 **Windows** 上执行：
 
-### 方法一（推荐）：Network 面板
-
-1. Chrome 打开钉钉文档页面
-2. F12 → Network 面板
-3. 刷新页面（F5）
-4. 点击任意请求
-5. 在 Headers 中找到 `Cookie:` 行
-6. 复制整个 Cookie 值（`name1=val1; name2=val2; ...`）
-
-### 方法二：Console（不完整）
-
-```javascript
-copy(document.cookie)
+```bash
+# 一键构建（自动安装依赖 + 打包）
+python build.py
 ```
 
-> 注意：此方法**无法获取 HttpOnly 的 cookie**（如 `doc_atoken`），可能导致登录失败。
+构建完成后，输出在 `dist/钉钉表格自动填入工具/` 目录。
 
-## 技术原理
+**手动构建：**
+```bash
+pip install -r requirements.txt
+pip install pyinstaller
+playwright install chromium
+pyinstaller build.spec --clean --noconfirm
+```
 
-钉钉在线表格使用 Canvas 渲染，没有 DOM 表格元素，无法通过常规 API 写入数据。本工具通过以下方式实现：
+### 发布分发
 
-1. **Cookie 注入**：模拟浏览器登录状态
-2. **键盘模拟**：使用 Playwright 发送键盘事件
-3. **精确定位**：从 A1 逐行 ArrowDown 导航（不使用 PageDown）
-4. **值验证**：Ctrl+C 读取单元格值验证定位准确性
-5. **安全编辑**：F2 → Ctrl+A → 输入 → Tab（不使用 Enter）
+将整个 `dist/钉钉表格自动填入工具/` 文件夹压缩为 zip 发给用户。用户解压后双击 exe 即可运行，无需安装任何东西。
+
+## 技术栈
+
+- **Python 3.9+**
+- **customtkinter** — 现代 GUI 界面
+- **Playwright** — 浏览器自动化（非 headless，需要可见窗口）
+- **openpyxl** — Excel 读写
+- **PyInstaller** — 打包为 exe
 
 ## 注意事项
 
-- Cookie 有效期有限，过期后需要重新获取
-- 只能编辑已有单元格，无法插入新行
-- 首次运行需要安装 Chromium 浏览器
-- 填入过程中请勿操作浏览器窗口
-- 大数据量（500+ 行）填入需要较长时间
+- 填入时请不要关闭弹出的浏览器窗口
+- 钉钉文档的 Cookie/登录态有效期为几个小时，超时需要重新登录
+- 每次键盘操作间隔 ~450ms，500 行数据约需 4-5 分钟
+- 不支持新增行，只能编辑已有单元格
 
-## 日志
-
-日志文件保存在 `~/.ding_forms_input/app.log`。
-
-## License
+## 许可
 
 MIT
