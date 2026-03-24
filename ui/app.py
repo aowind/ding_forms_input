@@ -77,7 +77,7 @@ class App(ctk.CTk):
         ).pack(pady=(15, 10))
 
         self.step_buttons: list[ctk.CTkButton] = []
-        steps = ["1. 登录", "2. 选 Sheet", "3. 选 Excel", "4. 执行填入"]
+        steps = ["1. 登录", "2. 表格信息", "3. 文件配置", "4. 执行填入"]
         self.step_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         self.step_frame.pack(fill="x", padx=10)
         for i, label in enumerate(steps):

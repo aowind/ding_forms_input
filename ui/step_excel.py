@@ -1,101 +1,236 @@
-"""Step 3: 选择本地 Excel - 加载文件、选 Sheet、选列"""
+"""Step 3: 文件选择 — 上传钉钉导出文件(映射) + 选择本地 Excel(数据源)"""
 
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from core.excel_reader import get_sheet_names, get_headers, read_data
+from core.excel_reader import (
+    get_sheet_names,
+    get_headers,
+    read_data,
+    build_id_mapping,
+)
 
 
 class StepExcel(ctk.CTkFrame):
-    """选择本地 Excel 步骤：选择文件、Sheet、匹配列和填入列。"""
+    """文件选择步骤，包含两个区域：
+    1. 钉钉表格导出文件 — 用于建立匹配映射
+    2. 本地数据文件 — 待填入的源数据
+    """
 
     def __init__(self, master, app_controller, **kwargs):
         super().__init__(master, **kwargs)
         self.app = app_controller
-        self._filepath = ""
-        self._all_headers: list[tuple[str, int]] = []
+        self._mapping_filepath = ""
+        self._mapping_headers: list[tuple[str, int]] = []
+        self._source_filepath = ""
+        self._source_headers: list[tuple[str, int]] = []
         self._build_ui()
 
     def _build_ui(self):
+        # Title
         ctk.CTkLabel(
-            self, text="📊 选择本地 Excel", font=ctk.CTkFont(size=22, weight="bold"),
-        ).pack(anchor="w", pady=(10, 15))
+            self, text="📊 文件选择与配置", font=ctk.CTkFont(size=22, weight="bold"),
+        ).pack(anchor="w", pady=(5, 10))
 
-        # File select
-        file_frame = ctk.CTkFrame(self, fg_color="transparent")
-        file_frame.pack(fill="x", pady=(0, 10))
-        self.file_label = ctk.CTkLabel(
-            file_frame, text="未选择文件", font=ctk.CTkFont(size=13), text_color="#888",
+        # Scrollable container for both sections
+        container = ctk.CTkScrollableFrame(self, height=480, width=700)
+        container.pack(fill="both", expand=True)
+
+        # ============ Section 1: 钉钉表格导出文件 ============
+        sec1_label = ctk.CTkLabel(
+            container, text="📌 第一步：上传钉钉表格导出文件（用于建立行映射）",
+            font=ctk.CTkFont(size=15, weight="bold"), text_color="#409EFF",
         )
-        self.file_label.pack(side="left")
+        sec1_label.pack(anchor="w", pady=(5, 3))
+
+        # Instructions
+        instructions = (
+            "📌 如何获取此文件：\n"
+            "   1. 在已打开的钉钉表格页面中，点击顶部工具栏的「表格」按钮\n"
+            "   2. 在下拉菜单中悬停「下载」，选择「Excel (.xlsx, 整个表格)」\n"
+            "   3. 将下载的 .xlsx 文件保存到本地，然后点击下方按钮选择\n"
+            "   ⚠️ 这个文件用于确定每行数据在钉钉表格中的位置，必须上传！"
+        )
+        ctk.CTkLabel(
+            container, text=instructions,
+            font=ctk.CTkFont(size=12), text_color="#AAA",
+            wraplength=680, justify="left",
+        ).pack(anchor="w", pady=(0, 8))
+
+        # Upload button
+        upload_frame1 = ctk.CTkFrame(container, fg_color="transparent")
+        upload_frame1.pack(fill="x", pady=(0, 5))
+        self.mapping_file_label = ctk.CTkLabel(
+            upload_frame1, text="❌ 未选择文件",
+            font=ctk.CTkFont(size=12), text_color="#FF4444",
+        )
+        self.mapping_file_label.pack(side="left", fill="x", expand=True)
         ctk.CTkButton(
-            file_frame, text="选择 .xlsx 文件", width=150, height=32,
-            command=self._on_select_file,
+            upload_frame1, text="📂 选择导出的 Excel", width=180, height=32,
+            font=ctk.CTkFont(size=12), command=self._on_select_mapping_file,
         ).pack(side="right")
 
-        # Sheet select
-        ctk.CTkLabel(self, text="选择 Sheet:", font=ctk.CTkFont(size=14)).pack(anchor="w", pady=(10, 5))
-        self.sheet_combo = ctk.CTkComboBox(self, width=700, height=36, command=self._on_sheet_change)
-        self.sheet_combo.pack(fill="x", pady=(0, 15))
+        # Mapping Sheet
+        ms_frame = ctk.CTkFrame(container, fg_color="transparent")
+        ms_frame.pack(fill="x", pady=(5, 3))
+        ctk.CTkLabel(ms_frame, text="导出文件的 Sheet:", font=ctk.CTkFont(size=13)).pack(side="left")
+        self.mapping_sheet_combo = ctk.CTkComboBox(ms_frame, width=350, height=32, command=self._on_mapping_sheet_change)
+        self.mapping_sheet_combo.pack(side="left", padx=(10, 0))
 
-        # Match column
-        ctk.CTkLabel(self, text="匹配列（用于匹配钉钉表格行的 ID 列）:", font=ctk.CTkFont(size=14)).pack(anchor="w")
-        self.match_col_combo = ctk.CTkComboBox(self, width=700, height=36)
-        self.match_col_combo.pack(fill="x", pady=(5, 15))
+        # Mapping match column
+        ctk.CTkLabel(
+            container, text="映射匹配列（导出文件中，哪一列的值用于匹配定位行）:",
+            font=ctk.CTkFont(size=13),
+        ).pack(anchor="w", pady=(8, 3))
+        self.mapping_col_combo = ctk.CTkComboBox(container, width=700, height=32)
+        self.mapping_col_combo.pack(fill="x", pady=(0, 5))
 
-        # Fill columns (multi-select with check boxes)
-        ctk.CTkLabel(self, text="填入列（要填入钉钉表格的数据列，可多选）:", font=ctk.CTkFont(size=14)).pack(anchor="w")
-        self.fill_cols_frame = ctk.CTkScrollableFrame(self, height=120, width=700)
-        self.fill_cols_frame.pack(fill="x", pady=(5, 15))
+        # Mapping status
+        self.mapping_status = ctk.CTkLabel(
+            container, text="", font=ctk.CTkFont(size=12), text_color="#888",
+        )
+        self.mapping_status.pack(anchor="w", pady=(0, 10))
+
+        # Separator
+        ctk.CTkFrame(container, height=2, fg_color="#444").pack(fill="x", pady=5)
+
+        # ============ Section 2: 本地数据文件 ============
+        sec2_label = ctk.CTkLabel(
+            container, text="📌 第二步：选择本地 Excel 数据文件（待填入的数据）",
+            font=ctk.CTkFont(size=15, weight="bold"), text_color="#409EFF",
+        )
+        sec2_label.pack(anchor="w", pady=(10, 5))
+
+        # Upload button
+        upload_frame2 = ctk.CTkFrame(container, fg_color="transparent")
+        upload_frame2.pack(fill="x", pady=(0, 5))
+        self.source_file_label = ctk.CTkLabel(
+            upload_frame2, text="❌ 未选择文件",
+            font=ctk.CTkFont(size=12), text_color="#FF4444",
+        )
+        self.source_file_label.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(
+            upload_frame2, text="📂 选择本地 Excel", width=180, height=32,
+            font=ctk.CTkFont(size=12), command=self._on_select_source_file,
+        ).pack(side="right")
+
+        # Source Sheet
+        ss_frame = ctk.CTkFrame(container, fg_color="transparent")
+        ss_frame.pack(fill="x", pady=(5, 3))
+        ctk.CTkLabel(ss_frame, text="数据文件的 Sheet:", font=ctk.CTkFont(size=13)).pack(side="left")
+        self.source_sheet_combo = ctk.CTkComboBox(ss_frame, width=350, height=32, command=self._on_source_sheet_change)
+        self.source_sheet_combo.pack(side="left", padx=(10, 0))
+
+        # Source match column
+        ctk.CTkLabel(
+            container, text="数据匹配列（本地文件中，哪一列的值与导出文件的匹配列对应）:",
+            font=ctk.CTkFont(size=13),
+        ).pack(anchor="w", pady=(8, 3))
+        self.source_match_combo = ctk.CTkComboBox(container, width=700, height=32)
+        self.source_match_combo.pack(fill="x", pady=(0, 5))
+
+        # Fill columns
+        ctk.CTkLabel(
+            container, text="填入列（要填入钉钉表格的数据列，可多选）:",
+            font=ctk.CTkFont(size=13),
+        ).pack(anchor="w", pady=(8, 3))
+
+        self.fill_cols_frame = ctk.CTkScrollableFrame(container, height=100, width=700)
+        self.fill_cols_frame.pack(fill="x", pady=(0, 5))
         self.fill_col_vars: dict[int, ctk.BooleanVar] = {}
 
-        # Confirm button
+        # Source status
+        self.source_status = ctk.CTkLabel(
+            container, text="", font=ctk.CTkFont(size=12), text_color="#888",
+        )
+        self.source_status.pack(anchor="w", pady=(0, 10))
+
+        # ============ Confirm ============
         self.confirm_btn = ctk.CTkButton(
             self, text="✅ 确认并准备填入", width=200, height=40,
             font=ctk.CTkFont(size=15, weight="bold"),
             command=self._on_confirm,
-            state="disabled",
         )
-        self.confirm_btn.pack(pady=10)
+        self.confirm_btn.pack(pady=8)
 
-        self.status_label = ctk.CTkLabel(self, text="", font=ctk.CTkFont(size=13), text_color="#888")
-        self.status_label.pack(pady=5)
+    # ---- Section 1: Mapping file ----
 
-    def _on_select_file(self):
+    def _on_select_mapping_file(self):
         path = filedialog.askopenfilename(
-            title="选择 Excel 文件",
+            title="选择从钉钉导出的 Excel 文件",
             filetypes=[("Excel 文件", "*.xlsx"), ("所有文件", "*.*")],
         )
         if not path:
             return
-        self._filepath = path
-        self.file_label.configure(text=path, text_color="#44FF44")
-        self.status_label.configure(text="加载 Sheet 列表...", text_color="#FFA500")
+        self._mapping_filepath = path
+        self.mapping_file_label.configure(text=f"✅ {path}", text_color="#44FF44")
+        self.mapping_status.configure(text="正在加载...", text_color="#FFA500")
         self.update()
 
         try:
             sheets = get_sheet_names(path)
-            self.sheet_combo.configure(values=sheets)
+            self.mapping_sheet_combo.configure(values=sheets)
             if sheets:
-                self.sheet_combo.set(sheets[0])
-                self._on_sheet_change(sheets[0])
-            self.status_label.configure(text=f"共 {len(sheets)} 个 Sheet", text_color="#44FF44")
+                self.mapping_sheet_combo.set(sheets[0])
+                self._on_mapping_sheet_change(sheets[0])
+            self.mapping_status.configure(text=f"共 {len(sheets)} 个 Sheet", text_color="#44FF44")
+            self.app.log(f"导出文件已加载: {path}")
         except Exception as e:
-            self.status_label.configure(text=f"加载失败: {e}", text_color="#FF4444")
-            self.app.log(f"加载 Excel 失败: {e}")
+            self.mapping_status.configure(text=f"加载失败: {e}", text_color="#FF4444")
+            self.app.log(f"加载导出文件失败: {e}")
 
-    def _on_sheet_change(self, sheet_name):
-        if not self._filepath or not sheet_name:
+    def _on_mapping_sheet_change(self, sheet_name):
+        if not self._mapping_filepath or not sheet_name:
             return
         try:
-            headers = get_headers(self._filepath, sheet_name)
-            self._all_headers = headers
+            headers = get_headers(self._mapping_filepath, sheet_name)
+            self._mapping_headers = headers
             labels = [h[0] for h in headers]
-            self.match_col_combo.configure(values=labels)
+            self.mapping_col_combo.configure(values=labels)
             if labels:
-                self.match_col_combo.set(labels[0])
+                self.mapping_col_combo.set(labels[0])
+            self.app.log(f"导出文件 Sheet「{sheet_name}」: {len(headers)} 列")
+        except Exception as e:
+            self.mapping_status.configure(text=f"读取失败: {e}", text_color="#FF4444")
+
+    # ---- Section 2: Source file ----
+
+    def _on_select_source_file(self):
+        path = filedialog.askopenfilename(
+            title="选择本地 Excel 数据文件",
+            filetypes=[("Excel 文件", "*.xlsx"), ("所有文件", "*.*")],
+        )
+        if not path:
+            return
+        self._source_filepath = path
+        self.source_file_label.configure(text=f"✅ {path}", text_color="#44FF44")
+        self.source_status.configure(text="正在加载...", text_color="#FFA500")
+        self.update()
+
+        try:
+            sheets = get_sheet_names(path)
+            self.source_sheet_combo.configure(values=sheets)
+            if sheets:
+                self.source_sheet_combo.set(sheets[0])
+                self._on_source_sheet_change(sheets[0])
+            self.source_status.configure(text=f"共 {len(sheets)} 个 Sheet", text_color="#44FF44")
+            self.app.log(f"数据文件已加载: {path}")
+        except Exception as e:
+            self.source_status.configure(text=f"加载失败: {e}", text_color="#FF4444")
+            self.app.log(f"加载数据文件失败: {e}")
+
+    def _on_source_sheet_change(self, sheet_name):
+        if not self._source_filepath or not sheet_name:
+            return
+        try:
+            headers = get_headers(self._source_filepath, sheet_name)
+            self._source_headers = headers
+            labels = [h[0] for h in headers]
+            self.source_match_combo.configure(values=labels)
+            if labels:
+                self.source_match_combo.set(labels[0])
 
             # Build fill column checkboxes
             for w in self.fill_cols_frame.winfo_children():
@@ -106,59 +241,94 @@ class StepExcel(ctk.CTkFrame):
                 self.fill_col_vars[col_idx] = var
                 cb = ctk.CTkCheckBox(
                     self.fill_cols_frame, text=label,
-                    variable=var, font=ctk.CTkFont(size=12),
+                    variable=var, font=ctk.CTkFont(size=11),
                 )
                 cb.pack(anchor="w", pady=1)
 
-            self.app.log(f"已加载 Sheet「{sheet_name}」，共 {len(headers)} 列")
-
+            self.app.log(f"数据文件 Sheet「{sheet_name}」: {len(headers)} 列")
+            self.source_status.configure(text="", text_color="#888")
         except Exception as e:
-            self.status_label.configure(text=f"读取 Sheet 失败: {e}", text_color="#FF4444")
-            self.app.log(f"读取 Sheet 失败: {e}")
+            self.source_status.configure(text=f"读取失败: {e}", text_color="#FF4444")
+
+    # ---- Confirm ----
 
     def _on_confirm(self):
-        if not self._filepath:
-            messagebox.showwarning("提示", "请先选择 Excel 文件")
-            return
+        errors = []
 
-        sheet = self.sheet_combo.get()
-        if not sheet:
-            messagebox.showwarning("提示", "请选择 Sheet")
-            return
+        # Validate mapping file
+        if not self._mapping_filepath:
+            errors.append("请上传钉钉表格导出文件")
+        mapping_col_label = self.mapping_col_combo.get()
+        mapping_col_idx = self._get_col_idx(mapping_col_label, self._mapping_headers)
+        if not mapping_col_idx:
+            errors.append("请选择映射匹配列")
 
-        # Match column
-        match_label = self.match_col_combo.get()
-        match_col_idx = self._get_col_idx(match_label)
-        if match_col_idx is None:
-            messagebox.showwarning("提示", "请选择匹配列")
-            return
+        # Validate source file
+        if not self._source_filepath:
+            errors.append("请选择本地数据文件")
+        source_sheet = self.source_sheet_combo.get()
+        if not source_sheet:
+            errors.append("请选择数据文件 Sheet")
+        source_match_label = self.source_match_combo.get()
+        source_match_idx = self._get_col_idx(source_match_label, self._source_headers)
+        if not source_match_idx:
+            errors.append("请选择数据匹配列")
 
         # Fill columns
-        selected_fill_cols = [
-            idx for idx, var in self.fill_col_vars.items() if var.get()
-        ]
+        selected_fill_cols = sorted(
+            [idx for idx, var in self.fill_col_vars.items() if var.get()]
+        )
         if not selected_fill_cols:
-            messagebox.showwarning("提示", "请至少选择一个填入列")
-            return
-        selected_fill_cols.sort()
+            errors.append("请至少选择一个填入列")
 
-        # Read data
+        if errors:
+            messagebox.showwarning("提示", "\n".join(errors))
+            return
+
+        # Build mapping from export file
         try:
-            self.status_label.configure(text="正在读取数据...", text_color="#FFA500")
-            self.update()
-            data = read_data(self._filepath, sheet, match_col_idx, selected_fill_cols)
+            mapping_sheet = self.mapping_sheet_combo.get() or None
+            self.app.log("正在从导出文件建立映射...")
+            mapping = build_id_mapping(
+                self._mapping_filepath,
+                sheet_name=mapping_sheet,
+                id_col=mapping_col_idx,
+            )
+            if not mapping:
+                messagebox.showwarning("提示", "映射为空！请检查映射匹配列是否正确，或导出文件是否包含数据")
+                return
+            self.app.id_mapping = mapping
+            self.app.log(f"✅ 映射建立成功: {len(mapping)} 个 ID")
+        except Exception as e:
+            messagebox.showerror("错误", f"建立映射失败: {e}")
+            return
+
+        # Read source data
+        try:
+            self.app.log("正在读取本地数据...")
+            data = read_data(
+                self._source_filepath,
+                source_sheet,
+                source_match_idx,
+                selected_fill_cols,
+            )
+            if not data:
+                messagebox.showwarning("提示", "未读取到数据，请检查数据匹配列是否有值")
+                return
             self.app.source_data = data
             self.app.fill_col_count = len(selected_fill_cols)
-            self.app.log(f"读取到 {len(data)} 行待填数据")
-            self.app.log(f"匹配列: {match_label}, 填入列: {len(selected_fill_cols)} 列")
-            self.status_label.configure(text=f"✅ 准备就绪", text_color="#44FF44")
-            self.app.go_step(4)
+            self.app.log(f"✅ 读取到 {len(data)} 行待填数据")
+            self.app.log(f"   匹配列: {source_match_label}")
+            self.app.log(f"   填入列: {len(selected_fill_cols)} 列")
+            self.app.log(f"   映射ID数: {len(mapping)}")
+            matched = sum(1 for d in data if d["match_value"] in mapping)
+            self.app.log(f"   预计可匹配: {matched}/{len(data)} 行")
+            self.app.go_step(3)
         except Exception as e:
-            self.status_label.configure(text=f"读取失败: {e}", text_color="#FF4444")
-            self.app.log(f"读取数据失败: {e}")
+            messagebox.showerror("错误", f"读取数据失败: {e}")
 
-    def _get_col_idx(self, label: str) -> int | None:
-        for h_label, h_idx in self._all_headers:
+    def _get_col_idx(self, label: str, headers: list[tuple[str, int]]) -> int | None:
+        for h_label, h_idx in headers:
             if h_label == label:
                 return h_idx
         return None
