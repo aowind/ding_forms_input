@@ -9,8 +9,9 @@ from dataclasses import dataclass, field
 logger = logging.getLogger(__name__)
 
 # 默认参数
-CELL_WAIT = 200            # 每次键盘操作等待 (ms)，相对移动可以更快
-CELL_WAIT_SLOW = 350       # 回退重定位时用慢速
+CELL_WAIT = 200            # 普通键盘操作等待 (ms)
+NAV_WAIT = 450             # ArrowDown 导航等待 (ms)，防止被识别为长按
+CELL_WAIT_SLOW = 500       # 回退重定位时用慢速
 TYPE_DELAY = 30            # 输入字符间隔 (ms)
 ROW_WAIT = 800             # 行间等待 (ms)
 
@@ -68,7 +69,7 @@ class TableFiller:
                 if self._abort:
                     return False
                 await self.page.keyboard.press("ArrowDown")
-                await asyncio.sleep(CELL_WAIT / 1000)
+                await asyncio.sleep(NAV_WAIT / 1000)
         elif rows_to_move < 0:
             # 向上移动 — 回到 A1 重新向下导航
             self._log(f"  需要上移 {-rows_to_move} 行，回 A1 重定位...")
@@ -77,7 +78,7 @@ class TableFiller:
                 if self._abort:
                     return False
                 await self.page.keyboard.press("ArrowDown")
-                await asyncio.sleep(CELL_WAIT / 1000)
+                await asyncio.sleep(NAV_WAIT / 1000)
 
         self._current_row = target_row
 
