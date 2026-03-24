@@ -107,8 +107,9 @@ class TableFiller:
             await asyncio.sleep(CELL_WAIT / 1000)
         self._current_col = match_col_offset
 
-        # Ctrl+C 验证
-        return await self._verify_cell()
+        # Ctrl+C 验证（读到一个值即可，后续 run() 会精确比对）
+        val = await self._read_cell()
+        return len(val) > 0
 
     async def _goto_a1(self):
         """回到 A1（慢速，用于错误恢复）。"""
