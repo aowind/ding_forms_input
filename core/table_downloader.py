@@ -36,23 +36,26 @@ async def download_table_excel(page, download_dir: str | Path) -> Path | None:
             logger.error("无法获取 iframe 位置")
             return None
 
+        # Playwright bounding_box 返回 dict，不是对象
+        bx, by = box["x"], box["y"]
+
         # 2. 点击 Table 菜单（工具栏第一个按钮）
-        table_btn_x = box.x + 34
-        table_btn_y = box.y + 88
+        table_btn_x = bx + 34
+        table_btn_y = by + 88
         await page.mouse.click(table_btn_x, table_btn_y)
         await asyncio.sleep(1.0)
 
         # 3. 鼠标悬停显示子菜单
-        await page.mouse.move(box.x + 30, box.y + 140)
+        await page.mouse.move(bx + 30, by + 140)
         await asyncio.sleep(1.5)
 
         # 4. 悬停 Download 选项
-        await page.mouse.move(box.x + 250, box.y + 175)
+        await page.mouse.move(bx + 250, by + 175)
         await asyncio.sleep(2.0)
 
         # 5. 点击 "Excel (.xlsx, table as a whole)" 选项
         #    Download 子菜单项通常在悬停后出现
-        await page.mouse.click(box.x + 320, box.y + 250)
+        await page.mouse.click(bx + 320, by + 250)
         await asyncio.sleep(1.0)
 
     # 保存下载的文件
