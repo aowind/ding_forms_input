@@ -149,11 +149,62 @@ class StepExcel(ctk.CTkFrame):
 
         # ============ Confirm ============
         self.confirm_btn = ctk.CTkButton(
-            self, text="✅ 确认并准备填入", width=200, height=40,
+            self, text="✅ 确认并建立映射", width=200, height=40,
             font=ctk.CTkFont(size=15, weight="bold"),
             command=self._on_confirm,
         )
         self.confirm_btn.pack(pady=8)
+
+        # ============ Mapping Preview (hidden initially) ============
+        self.preview_frame = ctk.CTkFrame(self, fg_color="transparent")
+
+        self.preview_title = ctk.CTkLabel(
+            self.preview_frame, text="📋 映射预览",
+            font=ctk.CTkFont(size=16, weight="bold"), text_color="#409EFF",
+        )
+        self.preview_title.pack(anchor="w", pady=(5, 3))
+
+        self.preview_stats = ctk.CTkLabel(
+            self.preview_frame, text="",
+            font=ctk.CTkFont(size=13), text_color="#AAA",
+        )
+        self.preview_stats.pack(anchor="w")
+
+        # Two-column layout: matched on left, unmatched on right
+        self.preview_columns = ctk.CTkFrame(self.preview_frame, fg_color="transparent")
+        self.preview_columns.pack(fill="both", expand=True, pady=5)
+
+        self.matched_frame = ctk.CTkFrame(self.preview_columns)
+        self.matched_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        ctk.CTkLabel(
+            self.matched_frame, text="✅ 可匹配的数据",
+            font=ctk.CTkFont(size=13, weight="bold"), text_color="#44FF44",
+        ).pack(anchor="w", padx=5, pady=(5, 2))
+        self.matched_text = ctk.CTkTextbox(
+            self.matched_frame, height=150, font=ctk.CTkFont(size=11, family="Consolas"),
+        )
+        self.matched_text.pack(fill="both", expand=True, padx=5, pady=(0, 5))
+
+        self.unmatched_frame = ctk.CTkFrame(self.preview_columns)
+        self.unmatched_frame.pack(side="left", fill="both", expand=True, padx=(5, 0))
+        ctk.CTkLabel(
+            self.unmatched_frame, text="❌ 未匹配的数据",
+            font=ctk.CTkFont(size=13, weight="bold"), text_color="#FF6666",
+        ).pack(anchor="w", padx=5, pady=(5, 2))
+        self.unmatched_text = ctk.CTkTextbox(
+            self.unmatched_frame, height=150, font=ctk.CTkFont(size=11, family="Consolas"),
+        )
+        self.unmatched_text.pack(fill="both", expand=True, padx=5, pady=(0, 5))
+
+        # Proceed to execute button (hidden initially)
+        self.proceed_btn = ctk.CTkButton(
+            self.preview_frame, text="🚀 开始执行填入 →", width=200, height=40,
+            font=ctk.CTkFont(size=15, weight="bold"),
+            fg_color="#44BB44",
+            hover_color="#55CC55",
+            command=self._on_proceed,
+        )
+        self.proceed_btn.pack(pady=8)
 
     # ---- Section 1: Mapping file ----
 
@@ -285,6 +336,9 @@ class StepExcel(ctk.CTkFrame):
             messagebox.showwarning("提示", "\n".join(errors))
             return
 
+        self.confirm_btn.configure(state="disabled", text="处理中...")
+        self.update()
+
         # Build mapping from export file
         try:
             mapping_sheet = self.mapping_sheet_combo.get() or None
@@ -296,11 +350,13 @@ class StepExcel(ctk.CTkFrame):
             )
             if not mapping:
                 messagebox.showwarning("提示", "映射为空！请检查映射匹配列是否正确，或导出文件是否包含数据")
+                self.confirm_btn.configure(state="normal", text="✅ 确认并建立映射")
                 return
             self.app.id_mapping = mapping
             self.app.log(f"✅ 映射建立成功: {len(mapping)} 个 ID")
         except Exception as e:
             messagebox.showerror("错误", f"建立映射失败: {e}")
+            self.confirm_btn.configure(state="normal", text="✅ 确认并建立映射")
             return
 
         # Read source data
@@ -314,18 +370,68 @@ class StepExcel(ctk.CTkFrame):
             )
             if not data:
                 messagebox.showwarning("提示", "未读取到数据，请检查数据匹配列是否有值")
+                self.confirm_btn.configure(state="normal", text="✅ 确认并建立映射")
                 return
             self.app.source_data = data
             self.app.fill_col_count = len(selected_fill_cols)
-            self.app.log(f"✅ 读取到 {len(data)} 行待填数据")
-            self.app.log(f"   匹配列: {source_match_label}")
-            self.app.log(f"   填入列: {len(selected_fill_cols)} 列")
-            self.app.log(f"   映射ID数: {len(mapping)}")
-            matched = sum(1 for d in data if d["match_value"] in mapping)
-            self.app.log(f"   预计可匹配: {matched}/{len(data)} 行")
-            self.app.go_step(3)
         except Exception as e:
             messagebox.showerror("错误", f"读取数据失败: {e}")
+            self.confirm_btn.configure(state="normal", text="✅ 确认并建立映射")
+            return
+
+        # Show preview instead of going directly to step 4
+        self._show_preview(mapping, data)
+
+    def _show_preview(self, mapping: dict, data: list[dict]):
+        """Show mapping preview with matched/unmatched data."""
+        matched_items = []
+        unmatched_items = []
+
+        for item in data:
+            mv = item["match_value"]
+            if mv in mapping:
+                matched_items.append((mv, mapping[mv]))
+            else:
+                unmatched_items.append(mv)
+
+        matched_items.sort(key=lambda x: x[1])  # sort by row number
+
+        # Stats
+        self.preview_stats.configure(
+            text=(
+                f"📊 总映射数: {len(mapping)}    |    "
+                f"源数据: {len(data)} 行    |    "
+                f"✅ 可匹配: {len(matched_items)} 行    |    "
+                f"❌ 未匹配: {len(unmatched_items)} 行"
+            ),
+        )
+
+        # Fill matched list
+        self.matched_text.configure(state="normal")
+        self.matched_text.delete("1.0", "end")
+        for mv, row in matched_items:
+            self.matched_text.insert("end", f"  {mv}  →  钉钉表格第 {row} 行\n")
+        self.matched_text.configure(state="disabled")
+
+        # Fill unmatched list
+        self.unmatched_text.configure(state="normal")
+        self.unmatched_text.delete("1.0", "end")
+        if unmatched_items:
+            for mv in unmatched_items:
+                self.unmatched_text.insert("end", f"  {mv}\n")
+        else:
+            self.unmatched_text.insert("end", "  （全部匹配成功 ✅）")
+        self.unmatched_text.configure(state="disabled")
+
+        # Show preview frame
+        self.preview_frame.pack(fill="both", expand=True, padx=5, pady=(5, 0))
+
+        self.app.log(f"映射预览: {len(matched_items)} 匹配, {len(unmatched_items)} 未匹配")
+        self.app.log("请查看映射关系，确认无误后点击「开始执行填入」")
+
+    def _on_proceed(self):
+        """User confirmed mapping preview, proceed to execute step."""
+        self.app.go_step(3)
 
     def _get_col_idx(self, label: str, headers: list[tuple[str, int]]) -> int | None:
         for h_label, h_idx in headers:
