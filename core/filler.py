@@ -223,9 +223,9 @@ class TableFiller:
         if not matched:
             return result
 
-        # 锁定用户输入，防止干扰
+        # 将浏览器窗口移到屏幕外，防止用户干扰
         if browser_manager:
-            await browser_manager.lock_input()
+            await browser_manager.hide_window()
 
         # 初始化位置
         await self.init_position()
@@ -281,8 +281,8 @@ class TableFiller:
         self._log("")
         self._log(f"🎉 完成！成功: {len(result.success)}, 失败: {len(result.failed)}, 跳过: {len(result.skipped)}")
 
-        # 解锁用户输入
+        # 恢复浏览器窗口位置
         if browser_manager:
-            await browser_manager.unlock_input()
+            await browser_manager.show_window()
 
         return result

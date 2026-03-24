@@ -100,90 +100,41 @@ class BrowserManager:
         d.mkdir(exist_ok=True)
         return d
 
-    async def lock_input(self, message: str = "⏳ 自动填入中，请勿操作...") -> None:
-        """在页面上注入全屏遮罩，阻止用户键盘/鼠标操作。
-
-        在 iframe 之外的页面层和 iframe 内部都注入遮罩。
-        """
-        assert self._page
-        overlay_js = f"""
-        () => {{
-            if (document.getElementById('__dingtable_lock')) return;
-            const div = document.createElement('div');
-            div.id = '__dingtable_lock';
-            div.style.cssText = `
-                position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-                z-index: 2147483647; background: rgba(0,0,0,0.05);
-                display: flex; align-items: center; justify-content: center;
-                pointer-events: all; cursor: not-allowed; user-select: none;
-            `;
-            const span = document.createElement('span');
-            span.textContent = '{message}';
-            span.style.cssText = `
-                font-size: 24px; color: rgba(0,0,0,0.3); font-family: sans-serif;
-                background: rgba(255,255,255,0.8); padding: 12px 24px;
-                border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            `;
-            div.appendChild(span);
-            document.body.appendChild(div);
-        }}
-        """
+    async def hide_window(self) -> None:
+        """将浏览器窗口移到屏幕外，防止用户操作干扰。"""
         try:
-            await self._page.evaluate(overlay_js)
-        except Exception:
-            pass
+            cdp = await self._browser.new_browser_cdp_session()
+            # 保存当前位置
+            result = await cdp.send("Browser.getWindowBounds", {"browserWindowId": 1})
+            self._saved_bounds = result.get("bounds", {})
+            # 移到屏幕外（保持窗口大小不变，确保 Canvas 正常渲染）
+            await cdp.send("Browser.setWindowBounds", {
+                "browserWindowId": 1,
+                "bounds": {
+                    "left": -1920,
+                    "top": 0,
+                    "width": self._saved_bounds.get("width", 1920),
+                    "height": self._saved_bounds.get("height", 1080),
+                    "windowState": "normal",
+                },
+            })
+            await cdp.detach()
+            logger.info("已将浏览器窗口移到屏幕外")
+        except Exception as e:
+            logger.warning("隐藏窗口失败（不影响功能）: %s", e)
 
-        # 也在 iframe 内注入
+    async def show_window(self) -> None:
+        """将浏览器窗口移回原位。"""
+        saved = getattr(self, "_saved_bounds", None)
+        if not saved:
+            return
         try:
-            iframe = await self._page.query_selector('iframe[src*="spreadsheet"]')
-            if iframe:
-                frame = await iframe.content_frame()
-                if frame:
-                    await frame.evaluate(overlay_js)
-        except Exception:
-            pass
-
-        # 拦截所有键盘事件
-        try:
-            await self._page.evaluate("""
-            () => {
-                const stop = e => { e.stopImmediatePropagation(); e.preventDefault(); };
-                window.addEventListener('keydown', stop, true);
-                window.addEventListener('keyup', stop, true);
-                window.addEventListener('keypress', stop, true);
-            }
-            """)
-        except Exception:
-            pass
-
-        logger.info("已锁定用户输入")
-
-    async def unlock_input(self) -> None:
-        """移除遮罩，恢复用户操作。"""
-        assert self._page
-        try:
-            await self._page.evaluate("""
-            () => {
-                const el = document.getElementById('__dingtable_lock');
-                if (el) el.remove();
-            }
-            """)
-        except Exception:
-            pass
-
-        # iframe 内也移除
-        try:
-            iframe = await self._page.query_selector('iframe[src*="spreadsheet"]')
-            if iframe:
-                frame = await iframe.content_frame()
-                if frame:
-                    await frame.evaluate("""
-                    () => {
-                        const el = document.getElementById('__dingtable_lock');
-                        if (el) el.remove();
-                    }
-                    """)
-        except Exception:
-            pass
-
-        logger.info("已解除用户输入锁定")
+            cdp = await self._browser.new_browser_cdp_session()
+            await cdp.send("Browser.setWindowBounds", {
+                "browserWindowId": 1,
+                "bounds": saved,
+            })
+            await cdp.detach()
+            logger.info("已恢复浏览器窗口位置")
+        except Exception as e:
+            logger.warning("恢复窗口失败: %s", e)
