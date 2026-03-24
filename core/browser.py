@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 import tempfile
 from pathlib import Path
 
@@ -23,6 +24,9 @@ class BrowserManager:
     async def launch(self) -> None:
         from playwright.async_api import async_playwright
 
+        # 首次运行时自动下载浏览器
+        await self._ensure_browser()
+
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(
             headless=False,
@@ -39,6 +43,38 @@ class BrowserManager:
         )
         self._page = await self._context.new_page()
         logger.info("浏览器已启动")
+
+    @staticmethod
+    async def _ensure_browser():
+        """检查 Chromium 是否已安装，没有则自动下载。"""
+        import shutil
+        from playwright.async_api import async_playwright
+
+        pw = await async_playwright().start()
+        try:
+            path = pw.chromium.executable_path
+            if path and shutil.which(path):
+                logger.info("Chromium 已就绪: %s", path)
+                return
+        except Exception:
+            pass
+        finally:
+            await pw.stop()
+
+        # 下载浏览器
+        logger.info("正在下载 Chromium 浏览器（首次运行，只需下载一次）...")
+        import asyncio
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "playwright", "install", "chromium",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode == 0:
+            logger.info("Chromium 下载完成")
+        else:
+            logger.error("Chromium 下载失败: %s", stderr.decode(errors="replace"))
+            raise RuntimeError(f"Chromium 下载失败，请手动执行: {sys.executable} -m playwright install chromium")
 
     async def close(self) -> None:
         if self._browser:
