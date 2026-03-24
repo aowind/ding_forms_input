@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def get_sheet_names(filepath: str | Path) -> list[str]:
     """返回 Excel 文件中的所有 Sheet 名称。"""
-    wb = load_workbook(filepath, data_only=True, read_only=True)
+    wb = load_workbook(filepath, data_only=True)
     names = wb.sheetnames
     wb.close()
     return names
@@ -27,7 +27,8 @@ def get_headers(filepath: str | Path, sheet_name: str) -> list[tuple[str, int]]:
         [(column_letter, col_index_1based), ...]
         例如 [('A', 1), ('B', 2), ...]
     """
-    wb = load_workbook(filepath, data_only=True, read_only=True)
+    # 注意：不能用 read_only=True，因为 read_only 模式下 max_column 经常返回 1
+    wb = load_workbook(filepath, data_only=True)
     ws = wb[sheet_name]
     headers: list[tuple[str, int]] = []
     for col_idx in range(1, ws.max_column + 1):
@@ -62,7 +63,7 @@ def read_data(
     Returns:
         [{'match_value': ..., 'fill_values': [str, ...], 'row': excel_row_number}, ...]
     """
-    wb = load_workbook(filepath, data_only=True, read_only=True)
+    wb = load_workbook(filepath, data_only=True)
     ws = wb[sheet_name]
     rows = []
 
@@ -104,7 +105,7 @@ def build_id_mapping(filepath: str | Path, sheet_name: str | None = None, id_col
     Returns:
         {id_value: excel_row_number}
     """
-    wb = load_workbook(filepath, data_only=True, read_only=True)
+    wb = load_workbook(filepath, data_only=True)
     if sheet_name:
         ws = wb[sheet_name]
     else:
